@@ -27,6 +27,16 @@ public final class ExecutionFormatter {
     }
 
     /** Classe CSS de la pastille de statut. */
+    /** Classe CSS du badge coloré d'un statut (vert, rouge, orange, gris). */
+    public static String badgeClass(ExecutionStatus status) {
+        return switch (status) {
+            case SUCCESS -> "badge-green";
+            case FAILURE -> "badge-red";
+            case WARNING -> "badge-amber";
+            case CANCELLED -> "badge-neutral";
+        };
+    }
+
     public static String statusClass(ExecutionStatus status) {
         return switch (status) {
             case SUCCESS -> "status-success";

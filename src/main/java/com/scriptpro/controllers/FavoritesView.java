@@ -2,6 +2,7 @@ package com.scriptpro.controllers;
 
 import com.scriptpro.models.Script;
 import com.scriptpro.ui.UiFactory;
+import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
@@ -42,12 +43,15 @@ final class FavoritesView {
         VBox card = UiFactory.card();
         Label name = UiFactory.title(script.getName());
         String tags = script.getTags().isEmpty() ? "" : " · #" + String.join(" #", script.getTags());
-        Label meta = label(script.getLanguage().getDisplayName() + " · " + script.getCategory() + tags, "muted-label");
+        HBox meta = new HBox(8, UiFactory.languageBadge(script.getLanguage()),
+                label(script.getCategory() + tags, "muted-label"));
+        meta.setAlignment(Pos.CENTER_LEFT);
         Label description = label(script.getDescription(), "muted-label");
         Button open = UiFactory.button("Ouvrir", "fas-code", "primary-button");
         Button run = UiFactory.button("Exécuter", "fas-play", "success-button");
         open.setOnAction(event -> context.navigator().openEditor(script));
         run.setOnAction(event -> context.navigator().runInEditor(script));
+        card.getStyleClass().add("accent-card");
         card.getChildren().addAll(name, meta, description, new HBox(10, open, run));
         return card;
     }

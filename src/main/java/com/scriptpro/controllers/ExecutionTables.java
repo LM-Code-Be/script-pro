@@ -12,6 +12,7 @@ import javafx.scene.control.TextArea;
 import java.util.List;
 import java.util.Optional;
 
+import static com.scriptpro.ui.UiFactory.badgeColumn;
 import static com.scriptpro.ui.UiFactory.column;
 
 /**
@@ -29,8 +30,10 @@ final class ExecutionTables {
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS);
         table.getColumns().setAll(List.of(
                 column("Script", ExecutionRecord::getScriptName),
-                column("Langage", record -> record.getLanguage().getDisplayName()),
-                column("Résultat", record -> record.getStatus().getDisplayName()),
+                badgeColumn("Langage", record -> record.getLanguage().getDisplayName(),
+                        record -> UiFactory.languageClass(record.getLanguage())),
+                badgeColumn("Résultat", record -> record.getStatus().getDisplayName(),
+                        record -> ExecutionFormatter.badgeClass(record.getStatus())),
                 column("Date", record -> DateFormatter.format(record.getStartedAt())),
                 column("Durée", record -> DateFormatter.duration(record.getDurationMillis())),
                 column("Code", record -> String.valueOf(record.getExitCode()))

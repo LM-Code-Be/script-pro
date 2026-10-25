@@ -17,6 +17,7 @@ import javafx.scene.layout.VBox;
 
 import java.util.List;
 
+import static com.scriptpro.ui.UiFactory.badgeColumn;
 import static com.scriptpro.ui.UiFactory.column;
 import static com.scriptpro.ui.UiFactory.label;
 
@@ -49,8 +50,10 @@ final class VariablesView {
                 column("Nom", VariableEntry::getName),
                 column("Valeur par défaut", VariableEntry::displayValue),
                 column("Description", VariableEntry::getDescription),
-                column("Sensible", variable -> variable.isSecret() ? "Oui" : "Non"),
-                column("Type", variable -> variable.isBuiltIn() ? "Intégrée" : "Personnalisée")
+                badgeColumn("Sensible", variable -> variable.isSecret() ? "Sensible" : "Non",
+                        variable -> variable.isSecret() ? "badge-red" : "badge-neutral"),
+                badgeColumn("Type", variable -> variable.isBuiltIn() ? "Intégrée" : "Personnalisée",
+                        variable -> variable.isBuiltIn() ? "badge-blue" : "badge-violet")
         ));
 
         TextField name = new TextField();

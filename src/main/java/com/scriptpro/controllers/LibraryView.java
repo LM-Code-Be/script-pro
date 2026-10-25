@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import static com.scriptpro.ui.UiFactory.badgeColumn;
 import static com.scriptpro.ui.UiFactory.column;
 
 /**
@@ -74,12 +75,14 @@ final class LibraryView {
         table.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
         table.getColumns().setAll(List.of(
                 column("Nom", Script::getName),
-                column("Langage", script -> script.getLanguage().getDisplayName()),
+                badgeColumn("Langage", script -> script.getLanguage().getDisplayName(),
+                        script -> UiFactory.languageClass(script.getLanguage())),
                 column("Catégorie", Script::getCategory),
                 column("Tags", Script::getTagsText),
                 column("Auteur", Script::getAuthor),
                 column("Mis à jour", script -> DateFormatter.format(script.getUpdatedAt())),
-                column("Favori", script -> script.isFavorite() ? "Oui" : "Non")
+                badgeColumn("Favori", script -> script.isFavorite() ? "★ Favori" : "—",
+                        script -> script.isFavorite() ? "badge-amber" : "badge-neutral")
         ));
         table.setOnMouseClicked(event -> {
             if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2

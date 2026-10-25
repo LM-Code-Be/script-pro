@@ -27,6 +27,7 @@ import javafx.application.Platform;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.image.PixelReader;
@@ -65,9 +66,6 @@ public final class DemoScreenshots {
             "01-dashboard", "02-bibliotheque", "03-editeur", "04-executions", "05-favoris",
             "06-modeles", "07-variables", "08-historique", "09-documentation", "10-parametres"
     };
-
-    /** Pages qui défilent : hauteur de fenêtre utilisée pour les capturer en entier. */
-    private static final Map<String, Integer> TALL_PAGES = Map.of("05-favoris", 1040, "06-modeles", 1680, "10-parametres", 1480);
 
     /** Chemin affiché à la place du dossier de démo réel (dans target/), plus parlant sur une capture. */
     private static final String DISPLAYED_FOLDER = "D:\\Scripts\\ScriptPro";
@@ -124,27 +122,26 @@ public final class DemoScreenshots {
                     for (int index = 0; index < PAGES.length; index++) {
                         Button button = navigation.get(index);
                         String page = PAGES[index];
-                        // Les Paramètres défilent : on agrandit la fenêtre pour capturer la page entière.
-                        double height = TALL_PAGES.getOrDefault(page, 900);
                         onFx(() -> {
-                            stage.setHeight(height + stage.getHeight() - scene.getHeight());
+                            resize(stage, scene, 900);
                             button.fire();
                             hideLocalPaths(root);
                         });
-                        pause(900); // fondu d'entrée de 180 ms + rendu de RichTextFX
+                        pause(1200); // fin des animations d'entrée (cascade, compteurs, barres)
                         if (page.equals("08-historique")) {
                             onFx(() -> selectHistoryRow(root, 7)); // un échec, pour montrer le détail des erreurs
-                            pause(400);
                         }
+                        fitWholePage(stage, scene, root);
                         capture(scene, OUTPUT.resolve(page + ".png"));
                     }
                     // Bonus : le tableau de bord en thème sombre.
                     onFx(() -> {
-                        stage.setHeight(900 + stage.getHeight() - scene.getHeight());
+                        resize(stage, scene, 900);
                         controllerToggleTheme(root);
                         navigation.get(0).fire();
                     });
-                    pause(900);
+                    pause(1200);
+                    fitWholePage(stage, scene, root);
                     capture(scene, OUTPUT.resolve("11-dashboard-sombre.png"));
                     onFx(() -> controllerToggleTheme(root)); // remet le thème clair dans la base de démo
                     pause(300);
@@ -157,6 +154,28 @@ public final class DemoScreenshots {
             }, "demo-screenshots");
             tour.setDaemon(true);
             tour.start();
+        }
+
+        /** Donne à la scène (zone intérieure de la fenêtre) la hauteur demandée. */
+        private static void resize(Stage stage, Scene scene, double sceneHeight) {
+            stage.setHeight(sceneHeight + stage.getHeight() - scene.getHeight());
+        }
+
+        /**
+         * Agrandit la fenêtre pour que la page entière tienne sans défilement,
+         * afin que la capture montre tout le contenu.
+         */
+        private static void fitWholePage(Stage stage, Scene scene, Parent root) throws InterruptedException {
+            onFx(() -> root.lookupAll(".content-scroll").stream()
+                    .filter(ScrollPane.class::isInstance).map(ScrollPane.class::cast).findFirst()
+                    .ifPresent(scroll -> {
+                        double viewport = scroll.getViewportBounds().getHeight();
+                        double needed = scroll.getContent().prefHeight(scroll.getViewportBounds().getWidth());
+                        if (needed > viewport + 1) {
+                            resize(stage, scene, scene.getHeight() + needed - viewport);
+                        }
+                    }));
+            pause(500);
         }
 
         /** Remplace, à l'affichage seulement, le chemin du dossier de démo par un chemin d'exemple. */

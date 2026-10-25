@@ -13,7 +13,7 @@
 ![Tests](https://img.shields.io/badge/tests-JUnit%205-25A162)
 ![Licence](https://img.shields.io/badge/licence-MIT-yellow)
 
-[Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Installation](#installation) · [Développement](#développement)
+[Fonctionnalités](#fonctionnalités) · [Captures d'écran](#captures-décran) · [Installation](#installation) · [Développement](#développement) · [📘 Tutoriel complet](TUTORIEL.md) · [🌐 Article sur lm-code.be](https://lm-code.be/gestionnaire-de-scripts-java-javafx-sqlite/)
 
 ![Tableau de bord ScriptPro](docs/screenshots/01-dashboard.png)
 
@@ -34,6 +34,10 @@ Les administrateurs systèmes et les techniciens support accumulent des dizaines
 - Coloration syntaxique, numéros de ligne, recherche et remplacement.
 - Variables dynamiques `{{IP}}`, `{{HOSTNAME}}`, `{{DOMAINE}}`… demandées avant l'exécution.
 - Raccourcis : `Ctrl+S` enregistrer, `F5` exécuter, `Maj+F5` arrêter, `Ctrl+F` rechercher.
+
+### Interface
+- Design moderne et coloré : badges de statut et de langage, indicateurs animés, transitions de page en cascade.
+- Thème clair et thème sombre.
 
 ### Exécution
 - Console intégrée avec **sortie en direct**, accents corrects quel que soit l'interpréteur.
@@ -90,6 +94,8 @@ Au premier lancement, une base locale `scriptpro.db` **vide** est créée dans l
 Les bases des versions précédentes sont migrées automatiquement.
 
 ## Développement
+
+> 📘 Tu veux comprendre comment l'application est construite, étape par étape et avec le « pourquoi » de chaque choix ? Lis le **[tutoriel complet](TUTORIEL.md)**, aussi disponible en version web sur **[lm-code.be](https://lm-code.be/gestionnaire-de-scripts-java-javafx-sqlite/)**.
 
 ### Tests
 

@@ -1,17 +1,18 @@
 package com.scriptpro.ui;
 
-import javafx.animation.FadeTransition;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextField;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
@@ -65,6 +66,7 @@ public final class MainWindow {
         Button button = UiFactory.button(text, iconLiteral, "nav-button");
         button.setMaxWidth(Double.MAX_VALUE);
         button.setAlignment(Pos.CENTER_LEFT);
+        button.getStyleClass().add("nav-" + key); // couleur d'icône propre à chaque section
         button.setOnAction(event -> action.run());
         navigationButtons.put(key, button);
         sidebar.getChildren().add(button);
@@ -78,15 +80,21 @@ public final class MainWindow {
         }
     }
 
+    /**
+     * Remplace le contenu central. La page entre en fondu, puis ses blocs principaux
+     * apparaissent en cascade : l'œil suit naturellement l'ordre de lecture.
+     */
     public void setContent(String title, String subtitle, Node content) {
         titleLabel.setText(title);
         subtitleLabel.setText(subtitle);
-        content.setOpacity(0);
         contentPane.getChildren().setAll(content);
-        FadeTransition transition = new FadeTransition(Duration.millis(180), content);
-        transition.setFromValue(0);
-        transition.setToValue(1);
-        transition.play();
+        Animations.enter(titleLabel.getParent(), Duration.ZERO);
+        Node page = content instanceof ScrollPane scrollPane ? scrollPane.getContent() : content;
+        if (page instanceof Pane pane && pane.getChildren().size() > 1) {
+            Animations.stagger(pane.getChildren());
+        } else {
+            Animations.enter(content, Duration.ZERO);
+        }
     }
 
     public void setDarkMode(boolean darkMode) {
