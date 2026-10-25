@@ -13,6 +13,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Accès SQLite aux variables dynamiques ({@code {{NOM}}}) et à leurs valeurs par défaut.
+ *
+ * @author LM-Code
+ */
 public final class VariableRepository {
     private final DatabaseManager databaseManager;
 
@@ -71,7 +76,7 @@ public final class VariableRepository {
     private VariableEntry insert(VariableEntry variable) {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                     "INSERT INTO variables(name, default_value, description, built_in, updated_at) VALUES(?, ?, ?, ?, ?)",
+                     "INSERT INTO variables(name, default_value, description, built_in, updated_at, secret) VALUES(?, ?, ?, ?, ?, ?)",
                      Statement.RETURN_GENERATED_KEYS)) {
             fill(statement, variable);
             statement.executeUpdate();
@@ -89,9 +94,9 @@ public final class VariableRepository {
     private VariableEntry update(VariableEntry variable) {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                     "UPDATE variables SET name = ?, default_value = ?, description = ?, built_in = ?, updated_at = ? WHERE id = ?")) {
+                     "UPDATE variables SET name = ?, default_value = ?, description = ?, built_in = ?, updated_at = ?, secret = ? WHERE id = ?")) {
             fill(statement, variable);
-            statement.setLong(6, variable.getId());
+            statement.setLong(7, variable.getId());
             statement.executeUpdate();
             return variable;
         } catch (SQLException exception) {
@@ -105,6 +110,7 @@ public final class VariableRepository {
         statement.setString(3, value(variable.getDescription()));
         statement.setInt(4, variable.isBuiltIn() ? 1 : 0);
         statement.setString(5, variable.getUpdatedAt().toString());
+        statement.setInt(6, variable.isSecret() ? 1 : 0);
     }
 
     private VariableEntry map(ResultSet resultSet) throws SQLException {
@@ -114,6 +120,7 @@ public final class VariableRepository {
                 resultSet.getString("default_value"),
                 resultSet.getString("description"),
                 resultSet.getInt("built_in") == 1,
+                resultSet.getInt("secret") == 1,
                 Instant.parse(resultSet.getString("updated_at"))
         );
     }

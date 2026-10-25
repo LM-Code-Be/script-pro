@@ -1,13 +1,23 @@
 package com.scriptpro.ui;
 
+import javafx.beans.property.SimpleStringProperty;
 import javafx.geometry.Insets;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import org.kordamp.ikonli.javafx.FontIcon;
 
+import java.util.function.Function;
+
+/**
+ * Fabrique des composants visuels récurrents, pour garder un style homogène entre les écrans.
+ *
+ * @author LM-Code
+ */
 public final class UiFactory {
     private UiFactory() {
     }
@@ -27,6 +37,13 @@ public final class UiFactory {
         return button;
     }
 
+    /** Bouton avec une infobulle (utile pour rappeler un raccourci clavier). */
+    public static Button button(String text, String iconLiteral, String styleClass, String tooltip) {
+        Button button = button(text, iconLiteral, styleClass);
+        button.setTooltip(new Tooltip(tooltip));
+        return button;
+    }
+
     public static VBox card() {
         VBox card = new VBox(12);
         card.getStyleClass().add("card");
@@ -38,6 +55,26 @@ public final class UiFactory {
         Label label = new Label(text);
         label.getStyleClass().add("section-title");
         return label;
+    }
+
+    public static Label label(String text, String styleClass) {
+        Label label = new Label(text == null ? "" : text);
+        label.getStyleClass().add(styleClass);
+        return label;
+    }
+
+    /** Paragraphe de texte qui revient à la ligne automatiquement. */
+    public static Label wrappedLabel(String text) {
+        Label label = label(text, "doc-paragraph");
+        label.setWrapText(true);
+        return label;
+    }
+
+    /** Colonne de tableau en lecture seule, alimentée par une fonction d'extraction. */
+    public static <T> TableColumn<T, String> column(String title, Function<T, String> mapper) {
+        TableColumn<T, String> column = new TableColumn<>(title);
+        column.setCellValueFactory(data -> new SimpleStringProperty(mapper.apply(data.getValue())));
+        return column;
     }
 
     public static Region spacer() {

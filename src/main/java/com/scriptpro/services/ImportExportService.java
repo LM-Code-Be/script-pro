@@ -3,10 +3,12 @@ package com.scriptpro.services;
 import com.scriptpro.models.ExecutionRecord;
 import com.scriptpro.models.Script;
 import com.scriptpro.models.ScriptLanguage;
+import com.scriptpro.utils.ConsoleCharsets;
 import com.scriptpro.utils.DateFormatter;
 import com.scriptpro.utils.PdfReportWriter;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,6 +16,11 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Import de fichiers scripts et exports (fichier source, JSON, PDF).
+ *
+ * @author LM-Code
+ */
 public final class ImportExportService {
     private final ScriptService scriptService;
 
@@ -22,7 +29,7 @@ public final class ImportExportService {
     }
 
     public Script importScript(Path file) throws IOException {
-        String content = Files.readString(file, StandardCharsets.UTF_8);
+        String content = readScriptFile(file);
         Script script = new Script();
         String fileName = file.getFileName().toString();
         int extensionIndex = fileName.lastIndexOf('.');
@@ -54,6 +61,7 @@ public final class ImportExportService {
             builder.append("    \"category\": \"").append(escape(script.getCategory())).append("\",\n");
             builder.append("    \"language\": \"").append(script.getLanguage().name()).append("\",\n");
             builder.append("    \"description\": \"").append(escape(script.getDescription())).append("\",\n");
+            builder.append("    \"tags\": \"").append(escape(script.getTagsText())).append("\",\n");
             builder.append("    \"content\": \"").append(escape(script.getContent())).append("\"\n");
             builder.append("  }");
             if (index < scripts.size() - 1) {
@@ -72,6 +80,7 @@ public final class ImportExportService {
         lines.add("Nom : " + script.getName());
         lines.add("Langage : " + script.getLanguage().getDisplayName());
         lines.add("Catégorie : " + script.getCategory());
+        lines.add("Tags : " + (script.getTags().isEmpty() ? "-" : script.getTagsText()));
         lines.add("Auteur : " + script.getAuthor());
         lines.add("Favori : " + (script.isFavorite() ? "Oui" : "Non"));
         lines.add("Créé le : " + DateFormatter.format(script.getCreatedAt()));
@@ -124,6 +133,29 @@ public final class ImportExportService {
             lines.add("");
         }
         return PdfReportWriter.write(file, "Export historique", "Journal des exécutions ScriptPro", lines);
+    }
+
+    /**
+     * Lit un fichier script en devinant son encodage : beaucoup d'anciens scripts Windows sont
+     * en ANSI (Windows-1252) et non en UTF-8. Les lire en UTF-8 strict échouerait
+     * (MalformedInputException) ; on retombe donc sur l'encodage natif du poste.
+     * Le BOM éventuel est retiré pour ne pas apparaître dans l'éditeur.
+     */
+    static String readScriptFile(Path file) throws IOException {
+        byte[] bytes = Files.readAllBytes(file);
+        if (bytes.length >= 2 && (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xFE) {
+            return new String(bytes, 2, bytes.length - 2, StandardCharsets.UTF_16LE);
+        }
+        String text = ConsoleCharsets.decode(bytes, bytes.length, nativeCharset());
+        return text.startsWith("\uFEFF") ? text.substring(1) : text;
+    }
+
+    private static Charset nativeCharset() {
+        try {
+            return Charset.forName(System.getProperty("native.encoding", "windows-1252"));
+        } catch (RuntimeException exception) {
+            return Charset.defaultCharset();
+        }
     }
 
     private String escape(String value) {

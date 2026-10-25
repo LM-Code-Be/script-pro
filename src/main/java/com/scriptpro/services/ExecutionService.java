@@ -3,30 +3,28 @@ package com.scriptpro.services;
 import com.scriptpro.models.ExecutionRecord;
 import com.scriptpro.models.ExecutionStatus;
 import com.scriptpro.models.Script;
-import com.scriptpro.models.ScriptLanguage;
 import com.scriptpro.repositories.ExecutionHistoryRepository;
 import javafx.concurrent.Task;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
+/**
+ * Orchestration d'une exécution depuis l'interface : substitution des variables, lancement
+ * en arrière-plan via {@link ScriptRunner}, masquage des valeurs sensibles et enregistrement
+ * du résultat dans l'historique.
+ *
+ * @author LM-Code
+ */
 public final class ExecutionService {
     private final ExecutionHistoryRepository historyRepository;
     private final VariableService variableService;
     private final SettingsService settingsService;
+    private final ScriptRunner scriptRunner;
     private final ExecutorService executorService = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "scriptpro-execution");
         thread.setDaemon(true);
@@ -35,109 +33,86 @@ public final class ExecutionService {
 
     public ExecutionService(ExecutionHistoryRepository historyRepository,
                             VariableService variableService,
-                            SettingsService settingsService) {
+                            SettingsService settingsService,
+                            ScriptRunner scriptRunner) {
         this.historyRepository = historyRepository;
         this.variableService = variableService;
         this.settingsService = settingsService;
+        this.scriptRunner = scriptRunner;
     }
 
-    public Task<ExecutionRecord> executeAsync(Script script, Map<String, String> variableValues) {
+    /**
+     * Exécution en cours : la tâche JavaFX fournit le résultat final, {@link #cancel()} arrête le script.
+     */
+    public static final class ExecutionHandle {
+        private final Task<ExecutionRecord> task;
+        private final ScriptRunner.Execution execution;
+
+        private ExecutionHandle(Task<ExecutionRecord> task, ScriptRunner.Execution execution) {
+            this.task = task;
+            this.execution = execution;
+        }
+
+        public Task<ExecutionRecord> task() {
+            return task;
+        }
+
+        public void cancel() {
+            execution.cancel();
+        }
+    }
+
+    /**
+     * Lance le script en arrière-plan.
+     *
+     * @param variableValues valeurs saisies pour les variables {@code {{NOM}}}
+     * @param liveOutput     reçoit la sortie au fil de l'eau, déjà masquée ; appelé hors du thread JavaFX
+     */
+    public ExecutionHandle executeAsync(Script script, Map<String, String> variableValues,
+                                        ScriptRunner.OutputListener liveOutput) {
+        String content = variableService.applyVariables(script.getContent(), variableValues);
+        List<String> secrets = variableService.secretValues(variableValues);
+        ScriptRunner.OutputListener maskedOutput = (text, error) ->
+                liveOutput.onOutput(VariableService.mask(text, secrets), error);
+
+        ScriptRunner.Execution execution = scriptRunner.prepare(
+                script.getLanguage(),
+                content,
+                settingsService.workingDirectory(),
+                Duration.ofSeconds(settingsService.executionTimeoutSeconds()),
+                maskedOutput);
+
         Task<ExecutionRecord> task = new Task<>() {
             @Override
             protected ExecutionRecord call() {
-                return execute(script, variableValues);
+                Instant startedAt = Instant.now();
+                ScriptRunner.Result result = execution.run();
+                if (!result.message().isBlank()) {
+                    // Message de ScriptPro (timeout, arrêt, interpréteur absent…) visible aussi en direct.
+                    maskedOutput.onOutput("\n" + result.message() + "\n", true);
+                }
+                return historyRepository.save(toRecord(script, startedAt, result, secrets));
             }
         };
         executorService.submit(task);
-        return task;
+        return new ExecutionHandle(task, execution);
     }
 
     public void shutdown() {
         executorService.shutdownNow();
     }
 
-    private ExecutionRecord execute(Script script, Map<String, String> variableValues) {
-        Instant startedAt = Instant.now();
-        Path tempFile = null;
-        try {
-            String content = variableService.applyVariables(script.getContent(), variableValues);
-            tempFile = Files.createTempFile("scriptpro-", script.getLanguage().getExtension());
-            Files.writeString(tempFile, content, StandardCharsets.UTF_8);
-            List<String> command = commandFor(script.getLanguage(), tempFile);
-            ProcessBuilder processBuilder = new ProcessBuilder(command);
-            processBuilder.directory(Path.of(".").toAbsolutePath().toFile());
-            Process process = processBuilder.start();
-
-            Future<String> stdout = executorService.submit(readStream(process.getInputStream()));
-            Future<String> stderr = executorService.submit(readStream(process.getErrorStream()));
-
-            boolean completed = process.waitFor(settingsService.executionTimeoutSeconds(), TimeUnit.SECONDS);
-            if (!completed) {
-                process.destroyForcibly();
-                ExecutionRecord timeoutRecord = record(script, startedAt, ExecutionStatus.FAILURE, -1,
-                        output(stdout), "Timeout d'exécution après " + settingsService.executionTimeoutSeconds() + " secondes.");
-                return historyRepository.save(timeoutRecord);
-            }
-
-            int exitCode = process.exitValue();
-            ExecutionStatus status = exitCode == 0 ? ExecutionStatus.SUCCESS : ExecutionStatus.FAILURE;
-            ExecutionRecord record = record(script, startedAt, status, exitCode, output(stdout), output(stderr));
-            return historyRepository.save(record);
-        } catch (Exception exception) {
-            ExecutionRecord record = record(script, startedAt, ExecutionStatus.FAILURE, -1, "", exception.getMessage());
-            return historyRepository.save(record);
-        } finally {
-            if (tempFile != null) {
-                try {
-                    Files.deleteIfExists(tempFile);
-                } catch (IOException ignored) {
-                }
-            }
+    private ExecutionRecord toRecord(Script script, Instant startedAt, ScriptRunner.Result result, List<String> secrets) {
+        ExecutionStatus status = switch (result.outcome()) {
+            case COMPLETED -> result.exitCode() == 0 ? ExecutionStatus.SUCCESS : ExecutionStatus.FAILURE;
+            case CANCELLED -> ExecutionStatus.CANCELLED;
+            case TIMEOUT, NOT_STARTED -> ExecutionStatus.FAILURE;
+        };
+        // Le message de ScriptPro (timeout, interpréteur absent…) est ajouté à la fin des erreurs.
+        String stderr = result.stderr();
+        if (!result.message().isBlank()) {
+            stderr = stderr.isBlank() ? result.message() : stderr.stripTrailing() + "\n\n" + result.message();
         }
-    }
-
-    private List<String> commandFor(ScriptLanguage language, Path file) {
-        List<String> command = new ArrayList<>();
-        switch (language) {
-            case POWERSHELL -> {
-                command.add("powershell.exe");
-                command.add("-NoProfile");
-                command.add("-ExecutionPolicy");
-                command.add("Bypass");
-                command.add("-File");
-                command.add(file.toAbsolutePath().toString());
-            }
-            case CMD, BATCH -> {
-                command.add("cmd.exe");
-                command.add("/c");
-                command.add(file.toAbsolutePath().toString());
-            }
-            case BASH -> {
-                command.add("bash");
-                command.add(file.toAbsolutePath().toString());
-            }
-            case PYTHON -> {
-                command.add("python");
-                command.add(file.toAbsolutePath().toString());
-            }
-        }
-        return command;
-    }
-
-    private Callable<String> readStream(InputStream inputStream) {
-        return () -> new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-    }
-
-    private String output(Future<String> future) {
-        try {
-            return future.get(2, TimeUnit.SECONDS);
-        } catch (Exception exception) {
-            return "";
-        }
-    }
-
-    private ExecutionRecord record(Script script, Instant startedAt, ExecutionStatus status, int exitCode,
-                                   String stdout, String stderr) {
         return new ExecutionRecord(
                 null,
                 script.getId(),
@@ -146,9 +121,9 @@ public final class ExecutionService {
                 status,
                 startedAt,
                 Duration.between(startedAt, Instant.now()).toMillis(),
-                exitCode,
-                stdout,
-                stderr,
+                result.exitCode(),
+                VariableService.mask(result.stdout(), secrets),
+                VariableService.mask(stderr, secrets),
                 System.getProperty("user.name", "Administrateur")
         );
     }

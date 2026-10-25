@@ -1,6 +1,5 @@
 package com.scriptpro.database;
 
-import com.scriptpro.models.ScriptLanguage;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -13,13 +12,37 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
 
+/**
+ * Point d'accès unique à la base SQLite locale : création du schéma, migrations,
+ * valeurs par défaut, sauvegarde et restauration.
+ *
+ * <p>Chaque dépôt ouvre une connexion courte via {@link #getConnection()} : aucune
+ * connexion n'est gardée ouverte, ce qui permet notamment la restauration à chaud.</p>
+ *
+ * @author LM-Code
+ */
 public final class DatabaseManager {
-    private static final Path DATABASE_PATH = Path.of("scriptpro.db");
+    private static final Path DEFAULT_DATABASE_PATH = Path.of("scriptpro.db");
+
+    private final Path databasePath;
+
+    public DatabaseManager() {
+        this(DEFAULT_DATABASE_PATH);
+    }
+
+    /** Permet d'utiliser un autre fichier de base (utile pour les tests). */
+    public DatabaseManager(Path databasePath) {
+        this.databasePath = databasePath.toAbsolutePath();
+    }
+
+    public Path getDatabasePath() {
+        return databasePath;
+    }
 
     public void initialize() {
         try {
             Class.forName("org.sqlite.JDBC");
-            Path parent = DATABASE_PATH.toAbsolutePath().getParent();
+            Path parent = databasePath.getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
             }
@@ -67,6 +90,7 @@ public final class DatabaseManager {
                 statement.execute("CREATE TABLE IF NOT EXISTS settings (" +
                         "key TEXT PRIMARY KEY," +
                         "value TEXT NOT NULL)");
+                migrate(connection);
                 seedData(connection);
             }
         } catch (ClassNotFoundException | IOException | SQLException exception) {
@@ -75,13 +99,97 @@ public final class DatabaseManager {
     }
 
     public Connection getConnection() throws SQLException {
-        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DATABASE_PATH.toAbsolutePath());
+        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA foreign_keys = ON");
         }
         return connection;
     }
 
+    /**
+     * Copie cohérente de la base vers {@code target}, même pendant l'utilisation.
+     * {@code VACUUM INTO} produit un fichier compact et refuse d'écraser un fichier existant,
+     * d'où la suppression préalable.
+     */
+    public void backupTo(Path target) throws IOException, SQLException {
+        Path absoluteTarget = target.toAbsolutePath();
+        if (absoluteTarget.equals(databasePath)) {
+            throw new IOException("La sauvegarde ne peut pas remplacer la base active.");
+        }
+        if (absoluteTarget.getParent() != null) {
+            Files.createDirectories(absoluteTarget.getParent());
+        }
+        Files.deleteIfExists(absoluteTarget);
+        try (Connection connection = getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("VACUUM INTO '" + absoluteTarget.toString().replace("'", "''") + "'");
+        }
+    }
+
+    /**
+     * Remplace le contenu de la base active par celui de {@code source}.
+     *
+     * <p>Le fichier est d'abord contrôlé (doit être une base ScriptPro), puis copié via l'API
+     * de sauvegarde SQLite. Le schéma est ensuite remis à niveau, au cas où la sauvegarde
+     * proviendrait d'une version plus ancienne de l'application.</p>
+     */
+    public void restoreFrom(Path source) throws IOException, SQLException {
+        Path absoluteSource = source.toAbsolutePath();
+        if (!Files.isRegularFile(absoluteSource)) {
+            throw new IOException("Fichier de sauvegarde introuvable : " + absoluteSource);
+        }
+        if (absoluteSource.equals(databasePath)) {
+            throw new IOException("Le fichier choisi est déjà la base active.");
+        }
+        validateBackup(absoluteSource);
+        try (Connection connection = getConnection(); Statement statement = connection.createStatement()) {
+            // Commande spécifique au pilote sqlite-jdbc (API « online backup » de SQLite).
+            statement.executeUpdate("restore from \"" + absoluteSource + "\"");
+        }
+        initialize();
+    }
+
+    /** Vérifie qu'un fichier est bien une base SQLite contenant les tables ScriptPro. */
+    private void validateBackup(Path file) throws IOException {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + file);
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(
+                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('scripts', 'execution_history')")) {
+            if (!resultSet.next() || resultSet.getInt(1) < 2) {
+                throw new IOException("Ce fichier n'est pas une sauvegarde ScriptPro valide.");
+            }
+        } catch (SQLException exception) {
+            throw new IOException("Ce fichier n'est pas une base SQLite lisible.", exception);
+        }
+    }
+
+    /**
+     * Mises à niveau du schéma pour les bases créées par une version précédente.
+     * Chaque étape est idempotente : elle ne fait rien si la colonne existe déjà.
+     */
+    private void migrate(Connection connection) throws SQLException {
+        addColumnIfMissing(connection, "scripts", "tags", "TEXT NOT NULL DEFAULT ''");
+        addColumnIfMissing(connection, "variables", "secret", "INTEGER NOT NULL DEFAULT 0");
+    }
+
+    private void addColumnIfMissing(Connection connection, String table, String column, String definition) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             ResultSet columns = statement.executeQuery("PRAGMA table_info(" + table + ")")) {
+            while (columns.next()) {
+                if (column.equalsIgnoreCase(columns.getString("name"))) {
+                    return;
+                }
+            }
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+        }
+    }
+
+    /**
+     * Valeurs par défaut d'une nouvelle installation : catégories, variables intégrées
+     * et paramètres. Aucun script n'est créé : l'utilisateur démarre avec une bibliothèque
+     * vide (les exemples sont proposés dans l'écran Modèles).
+     */
     private void seedData(Connection connection) throws SQLException {
         if (isTableEmpty(connection, "categories")) {
             insertCategory(connection, "Administration", "#2563EB");
@@ -104,44 +212,7 @@ public final class DatabaseManager {
             insertSetting(connection, "editorFontSize", "14");
             insertSetting(connection, "notifications", "true");
             insertSetting(connection, "preferredTerminal", "PowerShell");
-        }
-        if (isTableEmpty(connection, "scripts")) {
-            insertScript(connection,
-                    "Inventaire système PowerShell",
-                    "Inventaire",
-                    ScriptLanguage.POWERSHELL,
-                    "Collecte les informations principales du poste Windows.",
-                    "Get-ComputerInfo | Select-Object CsName, WindowsProductName, WindowsVersion, OsArchitecture\n" +
-                            "Get-CimInstance Win32_OperatingSystem | Select-Object LastBootUpTime, FreePhysicalMemory",
-                    true);
-            insertScript(connection,
-                    "Diagnostic réseau",
-                    "Réseau",
-                    ScriptLanguage.CMD,
-                    "Affiche la configuration IP et teste une cible.",
-                    "ipconfig /all\nping {{IP}}",
-                    true);
-            insertScript(connection,
-                    "Services arrêtés",
-                    "Administration",
-                    ScriptLanguage.POWERSHELL,
-                    "Liste les services configurés en automatique mais non démarrés.",
-                    "Get-Service | Where-Object { $_.StartType -eq 'Automatic' -and $_.Status -ne 'Running' } | Select-Object Name, Status, StartType",
-                    false);
-            insertScript(connection,
-                    "Contrôle disque Bash",
-                    "Maintenance",
-                    ScriptLanguage.BASH,
-                    "Affiche l'utilisation disque et les volumes montés.",
-                    "df -h\nmount | column -t",
-                    false);
-            insertScript(connection,
-                    "Inventaire Python",
-                    "Inventaire",
-                    ScriptLanguage.PYTHON,
-                    "Affiche quelques informations système via Python.",
-                    "import platform\nimport socket\n\nprint(platform.platform())\nprint(socket.gethostname())",
-                    false);
+            insertSetting(connection, "workingDirectory", System.getProperty("user.home"));
         }
     }
 
@@ -180,38 +251,6 @@ public final class DatabaseManager {
             statement.setString(1, key);
             statement.setString(2, value);
             statement.executeUpdate();
-        }
-    }
-
-    private void insertScript(Connection connection, String name, String category, ScriptLanguage language,
-                              String description, String content, boolean favorite) throws SQLException {
-        String now = Instant.now().toString();
-        try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO scripts(name, category, language, description, content, author, created_at, updated_at, favorite, archived) " +
-                        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
-                Statement.RETURN_GENERATED_KEYS)) {
-            statement.setString(1, name);
-            statement.setString(2, category);
-            statement.setString(3, language.name());
-            statement.setString(4, description);
-            statement.setString(5, content);
-            statement.setString(6, System.getProperty("user.name", "Administrateur"));
-            statement.setString(7, now);
-            statement.setString(8, now);
-            statement.setInt(9, favorite ? 1 : 0);
-            statement.executeUpdate();
-            if (favorite) {
-                try (ResultSet keys = statement.getGeneratedKeys()) {
-                    if (keys.next()) {
-                        try (PreparedStatement favoriteStatement = connection.prepareStatement(
-                                "INSERT INTO favorites(script_id, created_at) VALUES(?, ?)")) {
-                            favoriteStatement.setLong(1, keys.getLong(1));
-                            favoriteStatement.setString(2, now);
-                            favoriteStatement.executeUpdate();
-                        }
-                    }
-                }
-            }
         }
     }
 }

@@ -14,6 +14,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Accès SQLite aux scripts de la bibliothèque (table {@code scripts} et table de liaison {@code favorites}).
+ *
+ * @author LM-Code
+ */
 public final class ScriptRepository {
     private final DatabaseManager databaseManager;
 
@@ -94,8 +99,8 @@ public final class ScriptRepository {
     private Script insert(Script script) {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                     "INSERT INTO scripts(name, category, language, description, content, author, created_at, updated_at, favorite, archived) " +
-                             "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     "INSERT INTO scripts(name, category, language, description, content, author, created_at, updated_at, favorite, archived, tags) " +
+                             "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                      Statement.RETURN_GENERATED_KEYS)) {
             fillStatement(statement, script);
             statement.executeUpdate();
@@ -115,9 +120,9 @@ public final class ScriptRepository {
         try (Connection connection = databaseManager.getConnection();
              PreparedStatement statement = connection.prepareStatement(
                      "UPDATE scripts SET name = ?, category = ?, language = ?, description = ?, content = ?, author = ?, " +
-                             "created_at = ?, updated_at = ?, favorite = ?, archived = ? WHERE id = ?")) {
+                             "created_at = ?, updated_at = ?, favorite = ?, archived = ?, tags = ? WHERE id = ?")) {
             fillStatement(statement, script);
-            statement.setLong(11, script.getId());
+            statement.setLong(12, script.getId());
             statement.executeUpdate();
             syncFavorite(connection, script);
             return script;
@@ -137,6 +142,7 @@ public final class ScriptRepository {
         statement.setString(8, script.getUpdatedAt().toString());
         statement.setInt(9, script.isFavorite() ? 1 : 0);
         statement.setInt(10, script.isArchived() ? 1 : 0);
+        statement.setString(11, script.getTagsText());
     }
 
     private void syncFavorite(Connection connection, Script script) throws SQLException {
@@ -159,7 +165,7 @@ public final class ScriptRepository {
     }
 
     private Script map(ResultSet resultSet) throws SQLException {
-        return new Script(
+        Script script = new Script(
                 resultSet.getLong("id"),
                 resultSet.getString("name"),
                 resultSet.getString("category"),
@@ -172,6 +178,8 @@ public final class ScriptRepository {
                 resultSet.getInt("favorite") == 1,
                 resultSet.getInt("archived") == 1
         );
+        script.setTagsText(resultSet.getString("tags"));
+        return script;
     }
 
     private String value(String text) {
