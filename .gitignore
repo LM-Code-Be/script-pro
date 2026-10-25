@@ -1,0 +1,4 @@
+/target/
+/scriptpro.db
+/exports/
+*.log
